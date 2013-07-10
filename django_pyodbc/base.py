@@ -1,6 +1,7 @@
 """
 MS SQL Server database backend for Django.
 """
+import datetime
 import os
 import re
 import sys
@@ -9,7 +10,8 @@ from django.core.exceptions import ImproperlyConfigured
 
 try:
     import pyodbc as Database
-except ImportError, e:
+except ImportError:
+    e = sys.exc_info()[1]
     raise ImproperlyConfigured("Error loading pyodbc module: %s" % e)
 
 m = re.match(r'(\d+)\.(\d+)\.(\d+)(?:-beta(\d+))?', Database.version)
@@ -37,6 +39,7 @@ else:
 
 from django_pyodbc.operations import DatabaseOperations
 from django_pyodbc.client import DatabaseClient
+from django_pyodbc.compat import binary_type, text_type, timezone
 from django_pyodbc.creation import DatabaseCreation
 from django_pyodbc.introspection import DatabaseIntrospection
 
@@ -47,6 +50,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     can_use_chunked_reads = False
     can_return_id_from_insert = True
     supports_microsecond_precision = False
+    supports_regex_backreferencing = False
     supports_subqueries_in_group_by = False
     supports_transactions = True
     #uses_savepoints = True
@@ -279,7 +283,7 @@ class CursorWrapper(object):
         self.last_params = ()
 
     def format_sql(self, sql, n_params=None):
-        if self.driver_needs_utf8 and isinstance(sql, unicode):
+        if self.driver_needs_utf8 and isinstance(sql, text_type):
             # FreeTDS (and other ODBC drivers?) don't support Unicode yet, so
             # we need to encode the SQL clause itself in utf-8
             sql = sql.encode('utf-8')
@@ -294,14 +298,14 @@ class CursorWrapper(object):
     def format_params(self, params):
         fp = []
         for p in params:
-            if isinstance(p, unicode):
+            if isinstance(p, text_type):
                 if self.driver_needs_utf8:
                     # FreeTDS (and other ODBC drivers?) doesn't support Unicode
                     # yet, so we need to encode parameters in utf-8
                     fp.append(p.encode('utf-8'))
                 else:
                     fp.append(p)
-            elif isinstance(p, str):
+            elif isinstance(p, binary_type):
                 if self.driver_needs_utf8:
                     # TODO: use system encoding when calling decode()?
                     fp.append(p.decode('utf-8').encode('utf-8'))
@@ -355,16 +359,18 @@ class CursorWrapper(object):
         Decode data coming from the database if needed and convert rows to tuples
         (pyodbc Rows are not sliceable).
         """
-        if not self.driver_needs_utf8:
+        needs_utc = _DJANGO_VERSION >= 14 and settings.USE_TZ
+        if not (needs_utc or self.driver_needs_utf8):
             return tuple(rows)
         # FreeTDS (and other ODBC drivers?) don't support Unicode yet, so we
         # need to decode UTF-8 data coming from the DB
         fr = []
         for row in rows:
-            if isinstance(row, str):
-                fr.append(row.decode('utf-8'))
-            else:
-                fr.append(row)
+            if self.driver_needs_utf8 and isinstance(row, binary_type):
+                row = row.decode('utf-8')
+            elif needs_utc and isinstance(row, datetime.datetime):
+                row = row.replace(tzinfo=timezone.utc)
+            fr.append(row)
         return tuple(fr)
 
     def fetchone(self):
