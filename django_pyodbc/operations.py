@@ -142,8 +142,15 @@ class DatabaseOperations(BaseDatabaseOperations):
         not quote the given name if it's already been quoted.
         """
         if name.startswith('[') and name.endswith(']'):
-            return name # Quoting once is enough.
+            return name  # Quoting once is enough.
         return '[%s]' % name
+
+    def quote_schema_name(self, schema, name):
+        """
+        Given a schema name and the name of some object in that schema, this
+        returns the dotted, schema-qualifed, and quoted version of that name.
+        """
+        return self.quote_name(schema) + '.' + self.quote_name(name)
 
     def random_function_sql(self):
         """

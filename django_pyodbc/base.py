@@ -110,7 +110,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             self.MARS_Connection = options.get('MARS_Connection', False)
             self.datefirst = options.get('datefirst', 7)
             self.unicode_results = options.get('unicode_results', False)
-            
+
             # make lookup operators to be collation-sensitive if needed
             self.collation = options.get('collation', None)
             if self.collation:
@@ -250,11 +250,20 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         return CursorWrapper(cursor, self.driver_needs_utf8)
 
     def _execute_foreach(self, sql, table_names=None):
+        # This method needs to take schemas into account, otherwise SQL Server
+        # will throw errors saying it can't find any table that's not in the
+        # current default schema. This is a problem for databases that use
+        # schemas  as a way to organize tables into related groups. In order
+        # to avoid breaking the previous API this will default the schema to
+        # 'dbo' when given a list of table_names that is not a list of tuples.
         cursor = self.cursor()
         if not table_names:
-            table_names = self.introspection.get_table_list(cursor)
-        for table_name in table_names:
-            cursor.execute(sql % self.ops.quote_name(table_name))
+            table_names = self.introspection.get_table_schemas(cursor)
+        for pair in table_names:
+            if type(pair) is not tuple:
+                pair = ('dbo', pair)
+            schema_table = self.ops.quote_schema_name(pair[0], pair[1])
+            cursor.execute(sql % schema_table)
 
     def check_constraints(self, table_names=None):
         self._execute_foreach('ALTER TABLE %s WITH CHECK CHECK CONSTRAINT ALL', table_names)

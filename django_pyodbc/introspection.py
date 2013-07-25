@@ -44,6 +44,15 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
         # Or pyodbc specific:
         #return [row[2] for row in cursor.tables(tableType='TABLE')]
 
+    def get_table_schemas(self, cursor):
+        """
+        Like get_table_list(), returns all the tables in the current database,
+        but this also returns each table's schema. The return value is a list
+        of tuples, where each tuple is the pair (table_schema, table_name).
+        """
+        cursor.execute("SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'")
+        return [(row[0], row[1]) for row in cursor.fetchall()]
+
     def _is_auto_field(self, cursor, table_name, column_name):
         """
         Checks whether column is Identity
